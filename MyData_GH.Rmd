@@ -1,0 +1,245 @@
+---
+title: "My Data Dashboard"
+output: 
+  flexdashboard::flex_dashboard: 
+  vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("HelpMe.r")
+library(zoo)
+library(patchwork)
+library(DT)
+library(plotly)
+library(tidyverse)
+library(lubridate)
+library(timetk)
+library(scales)
+library(devtools)
+library(googlesheets4)
+library(rio)
+library(flexdashboard)
+```
+
+```{r, include=FALSE}
+sheets_df <- read_sheet('https://docs.google.com/spreadsheets/d/1T5aBqYKlqTwXyZZQXrihkfNxLuKONRJomhFlTL6id4k/edit#gid=1028012845', "DataForR")
+
+```
+
+
+```{r, include=FALSE}
+fulldf <-  sheets_df %>% 
+mutate(
+chronic_sRPE = rollmean(sRPE, k = 28, align = "right", na.pad = T ),
+acute_sRPE = rollmean(sRPE, k = 7, align = "right", na.pad = T),
+chronic_HRV = rollmean(HRV, k = 28, align = "right", na.pad = T ),
+acute_HRV = rollmean(HRV, k = 7, align = "right", na.pad = T),
+chronic_RHR = rollmean(RHR, k = 28, align = "right", na.pad = T ),
+acute_RHR = rollmean(RHR, k = 7, align = "right", na.pad = T),
+rolling_energy = rollmean(Energy, k = 14, align = "right", na.pad = T),
+rolling_sore = rollmean(Soreness, k = 14, align = "right", na.pad = T))
+
+fulldf = fulldf %>%
+mutate(
+ACWR = acute_sRPE / chronic_sRPE, digits = 2) %>%
+mutate(Date2 = ydm(Date)) 
+
+summarized180 <- fulldf %>%
+mutate(Date2 = ymd(Date)) %>%
+filter(between(Date2, today() - days(180), today() )) %>%
+rename(DateOld = Date) %>%
+rename(Date = Date2) %>%
+drop_na() %>%
+summarize(
+HRV_avg = mean(HRV),
+HRV_sd = sd(HRV),
+RHR_avg = mean(RHR),
+RHR_sd = sd(RHR))
+
+summarized180 <- summarized180 %>%
+mutate(
+HRV_top = HRV_avg + HRV_sd,
+HRV_bottom = HRV_avg - HRV_sd,
+RHR_top = RHR_avg + RHR_sd,
+RHR_bottom = RHR_avg - RHR_sd)
+```
+
+Overview 
+==============================
+
+Column {data-width = 600}
+------------
+
+
+### **WORKLOAD + WELLNESS OVERVIEW**
+```{r, include=FALSE}
+fulldf
+
+last60 <-  fulldf %>%
+drop_na(RHR, RHR) %>%
+mutate(Date2 = ymd(Date)) %>%
+filter(between(Date2, today() - days(60), today() )) %>%
+rename(DateOld = Date) %>%
+rename(Date = Date2) %>%
+mutate(
+HRV_top = summarized180$HRV_top,
+HRV_bottom = summarized180$HRV_bottom,
+RHR_top = summarized180$RHR_top,
+RHR_bottom = summarized180$RHR_bottom)
+
+sRPEplot <- ggplot(data = last60) + 
+geom_area(aes(x = Date, y = chronic_sRPE), fill = "#00CC00", alpha = 0.2, color = "#33FF00") +
+geom_line(aes(x = Date, y = chronic_sRPE), color = "#00CC00", size = 1) +
+geom_col(aes(x = Date, y = sRPE), fill = "#FFCC33", color = "transparent") + 
+ylab("sRPE")+
+xlab(element_blank())+
+ggtitle("Session RPE") +
+theme(plot.title = element_text(size = 18)) + 
+theme_minimal()
+
+HRVplot <- ggplot(data = last60) + 
+geom_line(aes(x = Date, y = HRV), color = "#663366", size = 1.5) +
+geom_point(aes(x = Date, y = HRV), fill = "#663366", color = "#330066", size = 2) + 
+ylab("HRV")+
+geom_line(aes(x = Date, y = HRV_bottom), color = "blue", size = 1, linetype = "dashed", alpha = 0.5) +
+geom_line(aes(x = Date, y = HRV_top), color = "red", size = 1, linetype = "dashed", alpha = 0.5) + 
+xlab(element_blank())+
+ggtitle("HRV") +
+theme(plot.title = element_text(size = 18)) + 
+theme_minimal() +
+ylim(20,60)
+
+RHRplot <- ggplot(data = last60) + 
+geom_line(aes(x = Date, y = RHR), color = "#FF6666", size = 1.5) +
+geom_point(aes(x = Date, y = RHR), fill = "#CC0000", color = "#CC0000", size = 2) + 
+ylab("RHR")+
+geom_line(aes(x = Date, y = RHR_bottom), color = "blue", size = 1, linetype = "dashed", alpha = 0.5) +
+geom_line(aes(x = Date, y = RHR_top), color = "red", size = 1, linetype = "dashed", alpha = 0.5) + 
+xlab(element_blank())+
+theme_minimal() + 
+ggtitle("RHR") +
+theme(plot.title = element_text(size = 14)) + 
+ylim(40,60)
+
+sRPEplotly <-  ggplotly(sRPEplot)
+HRVplotly <- ggplotly(HRVplot)
+RHRplotly <- ggplotly(RHRplot)
+
+```
+
+```{r fig.width = 12, fig.height= 12, echo=FALSE}
+sRPEplotly
+```
+
+
+Column {data-width = 400}
+------------
+###
+
+```{r fig.width = 12, fig.height= 12, echo=FALSE}
+HRVplotly
+```
+
+###
+
+```{r fig.width = 12, fig.height= 12, echo=FALSE}
+RHRplotly
+```
+
+------------
+
+This Week
+==============================
+
+Column{.tabset}
+---------------------
+
+### **Energy**
+
+```{R, echo = FALSE}
+last7wellness <- fulldf %>%
+  mutate(Date2 = ymd(Date)) %>%
+  rename(OldDate = Date) %>%
+  rename(Date = Date2) %>%
+  rename(OldSleep = Sleep) %>%
+  rename(Sleep = `Sleep (hrs)`) %>%
+  filter(between(Date, today() - days(6), today()))
+
+ggplotly(ggplot(last7wellness, aes(x = Date, y = Energy)) + 
+  geom_line(aes(y = rolling_energy), color = "black", size = 1.5, linetype = 'dashed') + 
+  geom_col(fill = "#FFCC33") +
+  ylim(0,10) +
+  ylab(element_blank()) +
+  xlab(element_blank()) +
+  ggtitle("Energy") +
+  theme(plot.title = element_text(size = 18)) + 
+  theme_ipsum())
+```
+
+### **Soreness**
+
+```{R, echo = FALSE}
+ggplotly(ggplot(last7wellness, aes(x = Date)) + 
+  geom_line(aes(y = rolling_sore), color = "grey", size = 1.5, linetype = 'dashed') +
+  geom_col(aes(y = Soreness), fill = "#000222") +
+  ylim(0,10) +
+  ylab(element_blank()) +
+  xlab(element_blank()) +
+  ggtitle("Soreness") +
+  theme(plot.title = element_text(size = 18)) + 
+  theme_ipsum())
+
+```
+
+
+### **RHR**
+```{R, echo = FALSE}
+
+ggplotly(ggplot(last7wellness, aes(x = Date, y = RHR)) + 
+  geom_area(fill = "#FF6666", alpha = 0.5) +
+  geom_line(color = "#CC0000", size = 1.5) +
+  geom_point(color = "#FF6666", size = 3) +
+  ylab(element_blank()) +
+  xlab(element_blank()) +
+  ggtitle("RHR") +
+  theme(plot.title = element_text(size = 18)) + 
+  theme_ipsum())
+```
+
+### **HRV**
+
+```{R, echo = FALSE}
+
+ggplotly(ggplot(last7wellness, aes(x = Date, y = HRV)) + 
+  geom_area(color = "#663366", alpha = 0.5) +
+  geom_line(color = "#330066", size = 1.5) +
+  geom_point(color = "#663366", size = 3) +
+  ylab(element_blank()) +
+  xlab(element_blank()) +
+  ggtitle("HRV") +
+  theme(plot.title = element_text(size = 18)) + 
+  theme_ipsum())
+
+```
+
+Column
+------------------------
+
+### **7-Day Table**
+
+```{r fig.width= 8, echo= FALSE}
+last7table <- fulldf %>%
+  mutate(Date2 = ymd(Date)) %>%
+  rename(OldDate = Date) %>%
+  rename(Date = Date2) %>%
+  rename(OldSleep = Sleep) %>%
+  rename(Sleep = `Sleep (hrs)`) %>%
+  select(Date, HRV, RHR, sRPE, ACWR) %>%
+  filter(between(Date, today()-days(7), today())) %>%
+  arrange(desc(Date))
+
+last7table$ACWR <- format(last7table$ACWR, digits = 2)
+last7table$Date <- weekdays(last7table$Date)
+
+datatable(last7table, rownames = FALSE)
