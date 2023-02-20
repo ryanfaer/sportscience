@@ -26,8 +26,8 @@ df2 <- df %>%
 
 #+/- 1.5 Standard Devs for the Recovery score to create "ideal range" ribbon around recovery score; this is where you would
 #+ideally want to target for workload score
-df2$Recov_Avg = mean(Load_Recovery$RecoveryScore)/1.5
-df2$Recov_SD = sd(Load_Recovery$RecoveryScore)/1.5
+df2$Recov_Avg = mean(df2$RecoveryScore)/1.5
+df2$Recov_SD = sd(df2$RecoveryScore)/1.5
 
 df3 <- df2 %>%
   mutate(Recov_Top = RecoveryScore + Recov_SD) %>%
