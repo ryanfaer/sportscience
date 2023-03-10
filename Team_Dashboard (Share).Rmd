@@ -1,0 +1,282 @@
+---
+title: "Workload & Wellness Dashboard"
+output: 
+  flexdashboard::flex_dashboard: 
+  vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(DT)
+library(plotly)
+library(crosstalk)
+library(zoo)
+library(hrbrthemes)
+library(scales)
+library(devtools)
+```
+
+```{r, echo = FALSE}
+#Create Date List
+Dates = seq(as.Date("2023-01-01"), by= "day", length.out = 60)
+
+List_Date <- tibble(
+  Date = rep(Dates,8))
+
+#Create Roster List
+Roster <- rep(c("PlayerA", "PlayerB", "PlayerC","PlayerD","PlayerE","PlayerF","PlayerG","PlayerH"),60)
+Pos <- rep(c("Mid-Field","Mid-Field","Mid-Field","Mid-Field","Back-Field","Back-Field","Back-Field","Back-Field"),60)
+
+List_Roster <- tibble(
+  Name = Roster,
+  Position = Pos)
+
+List_Roster2 <- List_Roster %>% arrange(Name)
+  
+
+#Build Date+Roster List
+List_RosterDate <- List_Roster2 %>%
+mutate(Date = List_Date$Date)
+
+#Create sample dataframe
+df <- List_RosterDate %>% 
+  mutate(
+  TrainingLoad = round(rnorm(n=480, mean = 300, sd = 100),0),
+  Distance = round(rnorm(n=480, mean = 7500, sd = 1750),0),
+  Accels = round(rnorm(n=480, mean = 30, sd = 10),0))
+
+
+#Calculate Acute, Chronic and ACWR
+df_2 <- df %>%
+  group_by(Name) %>%
+  arrange(Name,Date) %>%
+  mutate(Acute_Load = rollapply(TrainingLoad, width = 7, FUN = sum, align = "right",  fill = NA),
+         Chronic_Load = rollapply(TrainingLoad, width = 28, FUN = sum, align = "right",  fill = NA)/4) %>%
+  ungroup() %>%
+  mutate(
+    ACWR_Load = round(Acute_Load/Chronic_Load,2))
+
+#Create Mid-Field Table       
+df_MidField <- df_2 %>%
+  select(Name, Position, Date, Distance, TrainingLoad, ACWR_Load, Accels) %>%
+  filter(Date == "2023-03-01") %>%
+  filter(Position == "Mid-Field") %>%
+  filter(ACWR_Load > 0)
+
+##create color ramps
+###For Mid-Fielder table
+col_ramp <- colorRampPalette(c("#99CCFF", "white", "#FF9999"))
+col_brk_Distance_MF <- sort(df_MidField$Distance)
+clr_Distance_MF <- col_ramp(length(col_brk_Distance_MF)+1)
+
+col_brk_Load_MF <- sort(df_MidField$TrainingLoad)
+clr_Load_MF <- col_ramp(length(col_brk_Load_MF)+1)
+
+col_brk_Accels_MF <- sort(df_MidField$Accels)
+clr_Accels_MF <- col_ramp(length(col_brk_Accels_MF)+1)
+
+#Create Mid-Field DT Table       
+table_MD <- datatable(df_MidField, rownames = FALSE,
+  caption = "Today's Data",
+  class = 'cell-border stripe',
+options = list(
+  columnDefs = list(
+    list(className = "dt-center", targets = 0:6))),
+colnames = c(
+  "Name",
+  "Position",
+  "Date",
+  "Distance",
+  "Load",
+  "ACWR",
+  "Accels")) %>%
+  formatRound(
+    columns = "ACWR_Load",
+    digits = 2) %>%
+  formatRound(
+    columns = c(3:4),
+    digits = 0) %>%
+  formatDate(
+    columns = "Date",
+    method = "toDateString") %>%
+  formatStyle(
+    columns = "ACWR_Load",
+    background = styleInterval(
+      cuts = c(0.8, 1.3),
+      values = c("#99CCFF","white", "#FFCCCC"))) %>%
+  formatStyle(
+    columns = "Distance",
+    background = styleInterval(
+      cuts = col_brk_Distance_MF,
+      values = clr_Distance_MF)) %>%
+  formatStyle(
+    columns = "TrainingLoad",
+    background = styleInterval(
+      cuts = col_brk_Load_MF,
+      values = clr_Load_MF)) %>%
+  formatStyle(
+    columns = "Accels",
+    background = styleInterval(
+      cuts = col_brk_Accels_MF,
+      values = clr_Accels_MF))
+
+#Create Mid-Field Table       
+df_BackField <- df_2 %>%
+  select(Name, Position, Date, Distance, TrainingLoad, ACWR_Load, Accels) %>%
+  filter(Date == "2023-03-01") %>%
+  filter(Position == "Back-Field") %>%
+  filter(ACWR_Load > 0)
+
+##create color ramps
+###For Mid-Fielder table
+
+col_brk_Distance_BF <- sort(df_BackField$Distance)
+clr_Distance_BF <- col_ramp(length(col_brk_Distance_BF)+1)
+
+col_brk_Load_BF <- sort(df_BackField$TrainingLoad)
+clr_Load_BF <- col_ramp(length(col_brk_Load_BF)+1)
+
+col_brk_Accels_BF <- sort(df_BackField$Accels)
+clr_Accels_BF <- col_ramp(length(col_brk_Accels_BF)+1)
+
+#Create Mid-Field DT Table       
+table_BF <- datatable(df_BackField, rownames = FALSE,
+          caption = "Today's Data",
+          class = 'cell-border stripe',
+          options = list(
+            columnDefs = list(
+              list(className = "dt-center", targets = 0:6))),
+          colnames = c(
+            "Name",
+            "Position",
+            "Date",
+            "Distance",
+            "Load",
+            "ACWR",
+            "Accels")) %>%
+  formatRound(
+    columns = "ACWR_Load",
+    digits = 2) %>%
+  formatRound(
+    columns = c(3:4),
+    digits = 0) %>%
+  formatDate(
+    columns = "Date",
+    method = "toDateString") %>%
+  formatStyle(
+    columns = "ACWR_Load",
+    background = styleInterval(
+      cuts = c(0.8, 1.3),
+      values = c("#99CCFF","white", "#FFCCCC"))) %>%
+  formatStyle(
+    columns = "Distance",
+    background = styleInterval(
+      cuts = col_brk_Distance_BF,
+      values = clr_Distance_BF)) %>%
+  formatStyle(
+    columns = "TrainingLoad",
+    background = styleInterval(
+      cuts = col_brk_Load_BF,
+      values = clr_Load_BF)) %>%
+  formatStyle(
+    columns = "Accels",
+    background = styleInterval(
+      cuts = col_brk_Accels_BF,
+      values = clr_Accels_BF))
+
+# Create High Key Plots
+## Distance Plot
+NameKey <- plotly::highlight_key(df_2, df_2$Name)
+
+Distance_Plot <- plot_ly(NameKey,
+        color = I("transparent"), type = "bar", showlegend = T) %>%
+  group_by(df_2$Name) %>% 
+  add_bars(x = df_2$Date,
+           y = df_2$Distance) %>%
+  layout(
+    margin = list(b = 160),
+    yaxis = list(range = c(0,15000),
+                 title = "Distance"),
+    xaxis = list(title = "Date", 
+                 gridwidth = 1,
+                 showline = TRUE
+                ))
+
+
+
+## Load Plot
+Load_Plot <- plot_ly(NameKey,
+                         color = I("transparent"), type = "bar", showlegend = T) %>%
+  group_by(df_2$Name) %>% 
+  add_bars(x = df_2$Date,
+           y = df_2$TrainingLoad) %>%
+  layout(
+    margin = list(b = 160),
+    yaxis = list(range = c(0,500),
+                 title = "Training Load"),
+    xaxis = list(title = "Date", 
+                 gridwidth = 1,
+                 showline = TRUE
+    ))
+
+## Accels Plot
+Accels_Plot <- plot_ly(NameKey,
+                     color = I("transparent"), type = "bar", showlegend = T) %>%
+  group_by(df_2$Name) %>% 
+  add_bars(x = df_2$Date,
+           y = df_2$Accels) %>%
+  layout(
+    margin = list(b = 160),
+    yaxis = list(range = c(0,60),
+                 title = "Accels"),
+    xaxis = list(title = "Date", 
+                 gridwidth = 1,
+                 showline = TRUE
+    ))
+
+
+```
+
+# WORKLOAD 
+
+## Column {.tabset}
+
+### **Mid-Fielder** 
+```{r, echo = FALSE}
+table_MD
+```
+
+### **Back-Fielders**
+```{r, echo = FALSE}
+table_BF
+```
+
+## Column {.tabset}
+
+### **Distance**
+```{r, fig.width = 6, fig.height = 12, echo = FALSE}
+highlight(
+  Distance_Plot,
+  selectize = TRUE,
+  dynamic = TRUE,
+  persistent = FALSE)
+```
+
+### **Training Load**
+```{r, fig.width = 6, fig.height = 12, echo = FALSE}
+highlight(
+  Load_Plot,
+  selectize = TRUE,
+  dynamic = TRUE,
+  persistent = FALSE)
+```
+
+### **Accels**
+```{r, fig.width = 6, fig.height = 12, echo = FALSE}
+highlight(
+  Accels_Plot,
+  selectize = TRUE,
+  dynamic = TRUE,
+  persistent = FALSE)
+```
