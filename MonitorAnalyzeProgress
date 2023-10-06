@@ -1,1 +1,294 @@
+---
+title: "Data Analytics Lab7"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(gt)
+library(lubridate)
+library(patchwork)
+library(DT)
+library(plotly)
+library(zoo)
+library(flexdashboard)
+library(shiny)
+library(shinyWidgets)
+```
+
+
+
+
+```{r, include=FALSE}
+#Create dataframe
+dataforr <- data.frame(
+  Date = seq(as.Date('2021-08-03'), as.Date('2023-10-03'), by = "days"),
+  Sleep_mins = rnorm(792, 360,30),
+  Sleep_hrs = rnorm(792,6,.3),
+  HRV = rnorm(792,45,7),
+  RHR = rnorm(792,45,7),
+  Energy = rnorm(792,45,7),
+  sRPE = rnorm(792,200,50),
+  Cond_sRPE = rnorm(792,150,10),
+  Run_sRPE = rnorm(792,250,60),
+  Bike_sRPE = rnorm(792,400,50)) %>%
+  mutate(Date = ymd(Date)) %>%
+  #Replace NA workload days with 0s
+  mutate(sRPE = ifelse(is.na(sRPE), 0, sRPE)) %>%
+  #Replace NA values in RHR and HRV data with average of last 30 non-NA values
+  mutate(HRV = ifelse(is.na(HRV), rollapply(HRV, width = 30, FUN = function(x) mean(x, na.rm = TRUE), align = "right"), HRV)) %>%
+  mutate(RHR = ifelse(is.na(RHR), rollapply(RHR, width = 30, FUN = function(x) mean(x, na.rm = TRUE), align = "right"), RHR)) %>%
+  #Create Acute (7-Day) and Chronic (28-Day) Averages
+  mutate(Acute_Load = rollapply(sRPE, width = 7, FUN = mean, align = "right",  fill = NA),
+         Chronic_Load = rollapply(sRPE, width = 28, FUN = mean, align = "right", fill = NA),
+         Acute_RHR = rollapply(RHR, width = 7, FUN = mean, align = "right",  fill = NA),
+         Chronic_RHR = rollapply(RHR, width = 28, FUN = mean, align = "right", fill = NA),
+         Acute_HRV = rollapply(HRV, width = 7, FUN = mean, align = "right",  fill = NA),
+         Chronic_HRV = rollapply(HRV, width = 28, FUN = mean, align = "right", fill = NA)) %>%
+  #Create ACWR and "Fitness" for sRPE
+  mutate(ACWR = round(Acute_Load/Chronic_Load, 2),
+         Form = round(Chronic_Load - Acute_Load, 0)) %>%
+  #Create ACWR
+  mutate(ACWR_Flag = case_when(ACWR > 1.3 ~ 2,
+                               ACWR < 0.8 ~ 1,
+                               (ACWR <= 1.3)&(ACWR >=0.8) ~ 0, TRUE ~ 0)) 
+
+#Create Standard Deviation Flags for HRV and RHR
+summary_wellness <- dataforr %>%
+  select(Date, HRV, RHR) %>%
+  filter(Date > today()-90) %>%
+  drop_na() %>%
+  summarize(AVG_HRV = mean(HRV),
+            AVG_RHR = mean(RHR),
+            SD_HRV = sd(HRV), 
+            SD_RHR = sd(RHR)) %>%
+  mutate(HRV_Top = AVG_HRV + SD_HRV*1.5,
+         HRV_Bottom = AVG_HRV - SD_HRV*1.5,
+         RHR_Top = AVG_RHR + SD_RHR*1.5,
+         RHR_Bottom = AVG_RHR - SD_RHR*1.5)
+
+HRV_Top <- summary_wellness$HRV_Top
+RHR_Top <- summary_wellness$RHR_Top
+HRV_Bottom <- summary_wellness$HRV_Bottom
+RHR_Bottom <- summary_wellness$RHR_Bottom
+
+#Inject flag threholds into DF 
+dataframe_2 <- dataforr %>%
+  mutate(HRV_Flag = case_when(HRV > HRV_Top ~ 2,
+                              HRV < HRV_Bottom ~ 1, TRUE ~ 0),
+         RHR_Flag = case_when(RHR > RHR_Top ~ 2,
+                              RHR < RHR_Bottom ~ 1, TRUE ~ 0)) %>%
+  mutate(Run_sRPE = ifelse(Run_sRPE == 0, NA, Run_sRPE),
+         Cond_sRPE = ifelse(Cond_sRPE == 0, NA, Cond_sRPE))
+
+#Merge Power Peaks data
+Peaks <- data.frame(
+  Date = c('2023-09-30', '2022-08-18', '2023-03-26', '2022-09-16'),
+  Bike_PR = c(NA_real_, 1, NA_real_, NA_real_),
+  Bike_KOM = c(1, NA_real_, NA_real_, NA_real_),
+  Run_PR = c(NA_real_, NA_real_, 1, NA_real_),
+  Run_KOM = c(NA_real_, NA_real_, NA_real_, 1)) %>%
+  mutate(Date = ymd(Date))
+
+dataframe_3 <- left_join(dataframe_2, Peaks, .by = c(Date), all = T) %>%
+    mutate(Label = 
+             case_when(Bike_PR == 1 ~ "P",
+                       Bike_KOM == 1 ~ "K",
+                       Run_PR == 1 ~"P",
+                       Run_KOM == 1 ~ "K",
+                       TRUE ~ NA_character_))
+
+
+```
+
+```{r, include=FALSE}
+#Training Load Chart
+TrainingLoadPlot <- dataframe_2 %>%
+  filter(Date > today()-90) %>%
+  ggplot(aes(x = Date)) +
+  geom_col(aes(y = sRPE), fill = "#FFCC33") +
+  geom_area(aes(y = Chronic_Load) , fill = "#00CC00", alpha = 0.2) +
+  geom_line(aes(y = Chronic_Load), color = "#00CC00", size = 1.3) +
+  theme_minimal() +
+  labs(
+    title = "Training Load - Last 90 Days",
+    subtitle = "Daily Training Load Values and Rolling 28-Day Average",
+    y = "Training Load")
+
+TrainingLoadPlotly <- ggplotly(TrainingLoadPlot)
+
+#HRV and RHR Charts
+ObjWellPlot <- dataframe_2 %>%
+  filter(Date > today() - 90) %>%
+  ggplot(aes(x = Date)) +
+  geom_line(aes(y = Chronic_HRV, color = "HRV"), size = 1.3) +
+  geom_line(aes(y = Chronic_RHR, color = "RHR"), size = 1.3) +
+  scale_color_manual(values = c("HRV" = "#663366", "RHR" = "darkred"),
+                     labels = c("HRV", "RHR")) +
+  theme_minimal() +
+  labs(
+    title = "Heart Rate Variability and Resting Heart Rate - Last 90 Days",
+    subtitle = "Rolling 28-Day Averages",
+    y = "HRV and RHR"
+  )
+
+ObjWellPlotly <- ggplotly(ObjWellPlot)
+
+
+# Value Boxes
+#HRV
+HRV_Today <-  dataframe_2 %>%
+  filter(Date == today()-3) %>%
+  select(HRV)
+
+HRV_Today <- HRV_Today$HRV
+
+HRV_valueBox <- valueBox(HRV_Today, 
+         icon = case_when(HRV_Today > HRV_Bottom ~ "ion-android-checkmark-circle",
+                          TRUE ~ "ion-android-close"),
+         color = case_when(HRV_Today > HRV_Top ~ "#99FFCC", 
+                           HRV_Today < HRV_Bottom ~ "#FF9999", 
+                           TRUE ~ "grey"))
+
+#RHR
+RHR_Today <-  dataframe_2 %>%
+  filter(Date == today()-3) %>%
+  select(RHR)
+
+RHR_Today <- RHR_Today$RHR
+
+RHR_valueBox <- valueBox(RHR_Today, 
+         icon = case_when(RHR_Today < HRV_Top ~ "ion-android-checkmark-circle",
+                          TRUE ~ "ion-android-close"),
+         color = case_when(RHR_Today > RHR_Top ~ "#FF9999", 
+                           RHR_Today < RHR_Bottom ~ "#99FFCC", 
+                           TRUE ~ "grey"))
+
+
+
+```
+MONITOR
+=====================================
+Row 
+-------------------------------------
+### HRV Today
+```{r, echo = FALSE}
+HRV_valueBox
+```
+
+### RHR Today
+```{r, echo = FALSE}
+RHR_valueBox
+```
+------------------------------------
+
+
+
+Row  {data-height = 650}
+-------------------------------------
+### 
+``` {r, echo = FALSE}
+TrainingLoadPlotly
+```
+
+
+### 
+``` {r, echo = FALSE}
+ObjWellPlotly
+ 
+```
+
+
+
+ANALYZE {data-orientation=columns}
+=====================================
+``` {r, echo = FALSE}
+dropdowns<- dataframe_2 %>%
+  select(-Date) %>%
+  colnames()
+
+selectInput("x_var", "X-Axis Variable", choices = dropdowns, selected = "HRV")
+selectInput("y_var", "Y-Axis Variable", choices = dropdowns, selected = "Acute_Load")
+
+
+sliderInput("date_range", "Date Range", 
+            min = min(dataframe_2$Date), 
+            max = max(dataframe_2$Date), 
+            value = c(min(dataframe_2$Date), max(dataframe_2$Date)), 
+            timeFormat = "%Y-%m-%d", 
+            width = "100%")
+```
+
+Row  
+-------------------------------------
+### Comparing Measures
+```{r, echo = FALSE}
+#Scatter plot
+renderPlot({
+  filtered_data <- dataframe_2 %>%
+    filter(Date >= input$date_range[1] & Date <= input$date_range[2])
+  
+  filtered_data %>%
+  ggplot(aes_string(x = input$x_var, y = input$y_var)) + 
+  geom_point(size = 3, color = "#FF6666") +
+    theme_minimal() +
+    ggtitle(paste(input$x_var, "vs", input$y_var)) +
+    theme(title = element_text(size = 18))
+})
+```
+
+PROGRESS {data-orientation=columns}
+=====================================
+``` {r, echo = FALSE}
+
+sliderInput("date_range_2", "Date Range Picker", 
+            min = min(dataframe_3$Date), 
+            max = max(dataframe_3$Date), 
+            value = c(min(dataframe_3$Date), max(dataframe_3$Date)), 
+            timeFormat = "%Y-%m-%d", 
+            width = "100%")
+
+```
+
+
+Row  
+-------------------------------------
+### 
+```{r, echo = FALSE}
+renderPlot({
+    filtered_data_2 <- dataframe_3 %>%
+      filter(Date >= input$date_range_2[1] & Date <= input$date_range_2[2])  
+  
+  filtered_data_2 %>%
+  ggplot(aes(x = Date)) + 
+    geom_col(aes(y = Bike_sRPE), fill = "black") +
+    geom_point(aes(y = Bike_PR*500), size = 7, shape = 23, color = "black", fill = "pink") +
+    geom_point(aes(y = Bike_KOM*500), size = 7, shape = 25, color = "black", fill = "darkorange") +
+    theme_minimal() +
+    ggtitle("Bike Training Load + PRs/KOMs") +
+    theme(title = element_text(size = 18))  
+})
+
+```
+### 
+```{r, echo = FALSE}
+renderPlot({
+    filtered_data_2 <- dataframe_3 %>%
+      filter(Date >= input$date_range_2[1] & Date <= input$date_range_2[2])  
+  
+  filtered_data_2 %>%
+  ggplot(aes(x = Date)) + 
+    geom_col(aes(y = Run_sRPE), fill = "#222222") +
+    geom_point(aes(y = Run_PR*500), size = 7, shape = 23, color = "black", fill = "pink") +
+    geom_point(aes(y = Run_KOM*500), size = 7, shape = 25, color = "black", fill = "darkorange") +
+    theme_minimal() +
+    ggtitle("Run Training Load + PRs/KOMs") +
+    theme(title = element_text(size = 18))  
+})
+
+```
 
